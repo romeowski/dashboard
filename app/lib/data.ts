@@ -118,36 +118,64 @@ export async function fetchCardData() {
 
 
 const ITEMS_PER_PAGE = 6;
+
 export async function fetchFilteredInvoices(query: string, currentPage: number) {
   const offset = (currentPage - 1) * ITEMS_PER_PAGE;
-  try {
-  const rows = await sql/* sql */`
-  SELECT
-    i.id,
-    COALESCE(i.amount, i.amount_cents)                AS amount,
-    COALESCE(i.date::timestamptz, NOW()::timestamptz) AS date,
-    COALESCE(i.status,'paid')                         AS status,
-    c.name,
-    NULLIF(c.email,'')                                AS email,
-    NULLIF(c.image_url,'')                            AS image_url
-  FROM public.invoices i
-  JOIN public.customers c ON i.customer_id = c.id
-  WHERE
-    c.name ILIKE ${`%${query}%`} OR
-    c.email ILIKE ${`%${query}%`} OR
-    COALESCE(i.amount, i.amount_cents)::text ILIKE ${`%${query}%`} OR
-    COALESCE(i.date::timestamptz::text,'') ILIKE ${`%${query}%`} OR
-    COALESCE(i.status,'') ILIKE ${`%${query}%`}
-  ORDER BY COALESCE(i.date::timestamptz, NOW()::timestamptz) DESC
-  LIMIT ${ITEMS_PER_PAGE} OFFSET ${offset}
-`;
 
-    return rows as InvoicesTable[];
+  // Tipi di riga attesi dalla query
+  type Row = {
+    id: number;
+    customer_id: number;
+    amount: number | string | null;
+    date: string | Date | null;
+    status: 'paid' | 'pending' | string | null;
+    name: string;
+    email: string | null;
+    image_url: string | null;
+  };
+
+  try {
+    const rows = await sql<Row[]>/* sql */`
+      SELECT
+        i.id,
+        i.customer_id,
+        COALESCE(i.amount, i.amount_cents)                AS amount,
+        COALESCE(i.date::timestamptz, NOW()::timestamptz) AS date,
+        COALESCE(i.status, 'paid')                        AS status,
+        c.name,
+        NULLIF(c.email, '')                               AS email,
+        NULLIF(c.image_url, '')                           AS image_url
+      FROM public.invoices i
+      JOIN public.customers c ON i.customer_id = c.id
+      WHERE
+        c.name ILIKE ${`%${query}%`} OR
+        c.email ILIKE ${`%${query}%`} OR
+        COALESCE(i.amount, i.amount_cents)::text ILIKE ${`%${query}%`} OR
+        COALESCE(i.date::timestamptz::text,'') ILIKE ${`%${query}%`} OR
+        COALESCE(i.status,'') ILIKE ${`%${query}%`}
+      ORDER BY COALESCE(i.date::timestamptz, NOW()::timestamptz) DESC
+      LIMIT ${ITEMS_PER_PAGE} OFFSET ${offset}
+    `;
+
+    // Mappo in InvoicesTable (evito cast “brutali”)
+    const invoices: InvoicesTable[] = rows.map((r) => ({
+      id: r.id,
+      customer_id: r.customer_id,
+      amount: Number(r.amount ?? 0),                               // numero in unità
+      date: typeof r.date === 'string' ? r.date : new Date(r.date ?? Date.now()).toISOString(),
+      status: (r.status ?? 'paid') as 'paid' | 'pending',
+      name: r.name,
+      email: r.email ?? '',
+      image_url: r.image_url ?? '',
+    }));
+
+    return invoices;
   } catch (error) {
     console.error('Database Error (fetchFilteredInvoices):', error);
     throw new Error('Failed to fetch invoices.');
   }
 }
+
 
 export async function fetchInvoicesPages(query: string) {
   try {
@@ -175,28 +203,31 @@ export async function fetchInvoicesPages(query: string) {
 
 export async function fetchInvoiceById(id: string) {
   try {
-    const data = await sql<InvoiceForm[]>`
+    const rows = await sql/* sql */`
       SELECT
-        invoices.id,
-        invoices.customer_id,
-        invoices.amount,
-        invoices.status
-      FROM invoices
-      WHERE invoices.id = ${id};
+        i.id,
+        i.customer_id,
+        COALESCE(i.amount, i.amount_cents) AS amount_cents,
+        i.status
+      FROM public.invoices i
+      WHERE i.id = ${id}
     `;
 
-    const invoice = data.map((invoice) => ({
-      ...invoice,
-      // Convert amount from cents to dollars
-      amount: invoice.amount / 100,
-    }));
+    if (!rows?.length) return null;
 
-    return invoice[0];
+    const r: any = rows[0];
+    return {
+      id: r.id,
+      customer_id: r.customer_id,
+      amount: Number(r.amount_cents) / 100, // ← il form vede € (non cent)
+      status: r.status,
+    } as InvoiceForm;
   } catch (error) {
-    console.error('Database Error:', error);
+    console.error('Database Error (fetchInvoiceById):', error);
     throw new Error('Failed to fetch invoice.');
   }
 }
+
 
 export async function fetchCustomers() {
   try {
@@ -218,27 +249,27 @@ export async function fetchCustomers() {
 export async function fetchFilteredCustomers(query: string) {
   try {
     const data = await sql<CustomersTableType[]>`
-		SELECT
-		  customers.id,
-		  customers.name,
-		  customers.email,
-		  customers.image_url,
-		  COUNT(invoices.id) AS total_invoices,
-		  SUM(CASE WHEN invoices.status = 'pending' THEN invoices.amount ELSE 0 END) AS total_pending,
-		  SUM(CASE WHEN invoices.status = 'paid' THEN invoices.amount ELSE 0 END) AS total_paid
-		FROM customers
-		LEFT JOIN invoices ON customers.id = invoices.customer_id
-		WHERE
-		  customers.name ILIKE ${`%${query}%`} OR
-        customers.email ILIKE ${`%${query}%`}
-		GROUP BY customers.id, customers.name, customers.email, customers.image_url
-		ORDER BY customers.name ASC
-	  `;
+      SELECT
+        c.id,
+        c.name,
+        c.email,
+        c.image_url,
+        COUNT(i.id) AS total_invoices,
+        SUM(CASE WHEN i.status = 'pending' THEN COALESCE(i.amount, i.amount_cents) ELSE 0 END) AS total_pending,
+        SUM(CASE WHEN i.status = 'paid'    THEN COALESCE(i.amount, i.amount_cents) ELSE 0 END) AS total_paid
+      FROM public.customers c
+      LEFT JOIN public.invoices i ON c.id = i.customer_id
+      WHERE
+        c.name  ILIKE ${`%${query}%`} OR
+        c.email ILIKE ${`%${query}%`}
+      GROUP BY c.id, c.name, c.email, c.image_url
+      ORDER BY c.name ASC
+    `;
 
     const customers = data.map((customer) => ({
       ...customer,
-      total_pending: formatCurrency(customer.total_pending),
-      total_paid: formatCurrency(customer.total_paid),
+      total_pending: formatCurrency(customer.total_pending ?? 0),
+      total_paid: formatCurrency(customer.total_paid ?? 0),
     }));
 
     return customers;
@@ -247,3 +278,4 @@ export async function fetchFilteredCustomers(query: string) {
     throw new Error('Failed to fetch customer table.');
   }
 }
+
