@@ -52,11 +52,11 @@ export async function createInvoice(
   const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
   try {
-    await sql/* sql */`
-      INSERT INTO invoices (customer_id, amount_cents, status, date)
-      VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
-    `;
-  } catch (e) {
+  await sql/* sql */`
+  INSERT INTO invoices (customer_id, amount_cents, amount, status, date)
+  VALUES (${customerId}, ${amountInCents}, ${amountInCents}, ${status}, ${date})
+`;
+  } catch {
     return { message: 'Database Error: Failed to Create Invoice.' };
   }
 
@@ -64,7 +64,7 @@ export async function createInvoice(
   redirect('/dashboard/invoices');
 }
 
-/* -------------------- UPDATE -------------------- */
+/* -------------------- UPDATE (useFormState signature) -------------------- */
 export async function updateInvoice(
   id: string,
   _prevState: ActionState,
@@ -85,14 +85,15 @@ export async function updateInvoice(
   const amountInCents = Math.round(amount * 100);
 
   try {
-    await sql/* sql */`
-      UPDATE invoices
-      SET customer_id = ${customerId},
-          amount_cents = ${amountInCents},
-          status = ${status}
-      WHERE id = ${id}
-    `;
-  } catch (e) {
+   await sql/* sql */`
+  UPDATE invoices
+  SET customer_id = ${customerId},
+      amount_cents = ${amountInCents},
+      amount       = ${amountInCents},   -- 🔥 tieni sincronizzato anche 'amount'
+      status       = ${status}
+  WHERE id = ${id}
+`;
+  } catch {
     return { message: 'Database Error: Failed to Update Invoice.' };
   }
 
@@ -106,12 +107,12 @@ export async function deleteInvoice(id: string): Promise<ActionState> {
     await sql/* sql */`DELETE FROM invoices WHERE id = ${id}`;
     revalidatePath('/dashboard/invoices');
     return { message: null };
-  } catch (e) {
+  } catch {
     return { message: 'Database Error: Failed to Delete Invoice.' };
   }
 }
 
-
+/* -------------------- AUTH -------------------- */
 export async function authenticate(
   prevState: string | undefined,
   formData: FormData,
@@ -129,4 +130,11 @@ export async function authenticate(
     }
     throw error;
   }
+}
+
+/* -------------------- WRAPPER per form senza useFormState -------------------- */
+/** Usa questa action nei form che fanno direttamente <form action={...}> */
+export async function updateInvoiceAction(id: string, formData: FormData) {
+  // riusa la updateInvoice con la firma a 3 argomenti
+  return updateInvoice(id, {} as ActionState, formData);
 }
