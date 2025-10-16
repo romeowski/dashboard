@@ -4,8 +4,6 @@ import { UpdateInvoice, DeleteInvoice } from '@/app/ui/invoices/buttons';
 import InvoiceStatus from '@/app/ui/invoices/status';
 import { formatDateToLocal, formatCurrency } from '@/app/lib/utils';
 
-// ⬇️ IMPORT **RELATIVO**: da /app/dashboard/invoices/table.tsx a /app/lib/data.ts
-import { fetchFilteredInvoices } from '../../lib/data';
 
 export default async function InvoicesTable({
   query,
@@ -14,8 +12,11 @@ export default async function InvoicesTable({
   query: string;
   currentPage: number;
 }) {
-  // Server Component: ok chiamare il DB qui
-  const invoices = await fetchFilteredInvoices(query, currentPage);
+
+  const { fetchFilteredInvoices } = await import('../../lib/data');
+
+    const invoices = await fetchFilteredInvoices(query, currentPage);
+
 
   return (
     <div className="mt-6 flow-root">
