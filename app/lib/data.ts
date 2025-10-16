@@ -116,17 +116,16 @@ export async function fetchCardData() {
   }
 }
 
-
 const ITEMS_PER_PAGE = 6;
 
 export async function fetchFilteredInvoices(query: string, currentPage: number) {
   const offset = (currentPage - 1) * ITEMS_PER_PAGE;
 
-  // Tipi di riga attesi dalla query
+  // Tipo riga grezza della query
   type Row = {
     id: number;
     customer_id: number;
-    amount: number | string | null;
+    amount: number | string | null;          // COALESCE(amount, amount_cents)
     date: string | Date | null;
     status: 'paid' | 'pending' | string | null;
     name: string;
@@ -157,12 +156,15 @@ export async function fetchFilteredInvoices(query: string, currentPage: number) 
       LIMIT ${ITEMS_PER_PAGE} OFFSET ${offset}
     `;
 
-    // Mappo in InvoicesTable (evito cast “brutali”)
+    // 🔥 Mappatura esplicita nel tipo InvoicesTable (niente cast)
     const invoices: InvoicesTable[] = rows.map((r) => ({
       id: r.id,
       customer_id: r.customer_id,
-      amount: Number(r.amount ?? 0),                               // numero in unità
-      date: typeof r.date === 'string' ? r.date : new Date(r.date ?? Date.now()).toISOString(),
+      amount: Number(r.amount ?? 0), // in unità
+      date:
+        typeof r.date === 'string'
+          ? r.date
+          : new Date(r.date ?? Date.now()).toISOString(),
       status: (r.status ?? 'paid') as 'paid' | 'pending',
       name: r.name,
       email: r.email ?? '',
@@ -175,6 +177,7 @@ export async function fetchFilteredInvoices(query: string, currentPage: number) 
     throw new Error('Failed to fetch invoices.');
   }
 }
+
 
 
 export async function fetchInvoicesPages(query: string) {
